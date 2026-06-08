@@ -39,20 +39,46 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Graceful shutdown
+
+const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  process.exit(0);
-});
+function gracefulShutdown(signal) {
+  console.log(`${signal} received. Starting graceful shutdown...`);
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  process.exit(0);
-});
+  server.close(async () => {
+    console.log('HTTP server closed. No new connections accepted.');
 
+    try {
+      const pool = require('./config/database');
+      await pool.end();
+      console.log('PostgreSQL pool closed.');
+    } catch (err) {
+      console.error('Error closing PostgreSQL pool:', err);
+    }
+
+    try {
+      const redisClient = require('./config/redis');
+      if (redisClient.isOpen) {
+        await redisClient.quit();
+        console.log('Redis connection closed.');
+      }
+    } catch (err) {
+      console.error('Error closing Redis connection:', err);
+    }
+
+    console.log('Graceful shutdown complete.');
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.error('Graceful shutdown timed out. Forcing exit.');
+    process.exit(1);
+  }, 8000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
