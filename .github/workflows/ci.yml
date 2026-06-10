@@ -3,8 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
   pull_request:
     branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,6 +23,7 @@ permissions:
   packages: write
   id-token: write
   security-events: write
+  issues: write
 
 env:
   REGISTRY: ghcr.io
@@ -41,10 +50,26 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run lint --if-present
+        id: lint
+        run: |
+         npm run lint --if-present || {
+          echo "::error title=Backend lint failed::Run cd backend && npm run lint locally"
+          exit 1
+         }
 
       - name: Test
+        id: test
         run: npm test --if-present
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Backend lint & test" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Step | Outcome |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Lint | ${{ steps.lint.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test | ${{ steps.test.outcome }} |" >> "$GITHUB_STEP_SUMMARY"  
 
   lint-test-frontend:
     runs-on: ubuntu-latest
@@ -64,15 +89,31 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run lint --if-present
-
+        id: lint
+        run: |
+         npm run lint --if-present || {
+          echo "::error title=Frontend lint failed::Run cd frontend && npm run lint locally"
+          exit 1
+         } 
+        
       - name: Test
+        id: test
         run: npm test --if-present
 
       - name: Production build
         run: npm run build
         env:
           VITE_API_BASE_URL: ${{ env.VITE_API_BASE_URL }}
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Frontend lint & test" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Step | Outcome |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Lint | ${{ steps.lint.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test | ${{ steps.test.outcome }} |" >> "$GITHUB_STEP_SUMMARY" 
 
   build-scan-sign-backend:
     needs: [lint-test-backend]
@@ -201,3 +242,39 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign sign --yes "${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}@${DIGEST}"
+
+
+  pr-summary:
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs:
+      - lint-test-backend
+      - lint-test-frontend
+      - build-scan-sign-backend
+      - build-scan-sign-frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Comment PR summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+
+            const body = `### CI summary
+
+            - Backend lint/test: ${{ needs.lint-test-backend.result }}
+            - Frontend lint/test: ${{ needs.lint-test-frontend.result }}
+            - Backend image build: ${{ needs.build-scan-sign-backend.result }}
+            - Frontend image build: ${{ needs.build-scan-sign-frontend.result }}
+
+            [View workflow run](${runUrl})
+            `;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
