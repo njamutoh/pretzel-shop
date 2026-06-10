@@ -101,6 +101,7 @@ jobs:
         run: npm test --if-present
 
       - name: Production build
+        id: build
         run: npm run build
         env:
           VITE_API_BASE_URL: ${{ env.VITE_API_BASE_URL }}
@@ -113,7 +114,8 @@ jobs:
           echo "| Step | Outcome |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Lint | ${{ steps.lint.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Test | ${{ steps.test.outcome }} |" >> "$GITHUB_STEP_SUMMARY" 
+          echo "| Test | ${{ steps.test.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | ${{ steps.build.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
 
   build-scan-sign-backend:
     needs: [lint-test-backend]
