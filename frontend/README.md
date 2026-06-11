@@ -106,3 +106,4 @@ npm run preview
 - The app is fully responsive and works on mobile, tablet, and desktop
 
 Cache test run 1
+Cache test run 2
