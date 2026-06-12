@@ -39,46 +39,48 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Graceful shutdown
+module.exports = { app };
 
-const server = app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
-
-function gracefulShutdown(signal) {
-  console.log(`${signal} received. Starting graceful shutdown...`);
-
-  server.close(async () => {
-    console.log('HTTP server closed. No new connections accepted.');
-
-    try {
-      const pool = require('./config/database');
-      await pool.end();
-      console.log('PostgreSQL pool closed.');
-    } catch (err) {
-      console.error('Error closing PostgreSQL pool:', err);
-    }
-
-    try {
-      const redisClient = require('./config/redis');
-      if (redisClient.isOpen) {
-        await redisClient.quit();
-        console.log('Redis connection closed.');
-      }
-    } catch (err) {
-      console.error('Error closing Redis connection:', err);
-    }
-
-    console.log('Graceful shutdown complete.');
-    process.exit(0);
+if (require.main === module) {
+  const server = app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 
-  setTimeout(() => {
-    console.error('Graceful shutdown timed out. Forcing exit.');
-    process.exit(1);
-  }, 8000);
-}
+  function gracefulShutdown(signal) {
+    console.log(`${signal} received. Starting graceful shutdown...`);
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    server.close(async () => {
+      console.log('HTTP server closed. No new connections accepted.');
+
+      try {
+        const pool = require('./config/database');
+        await pool.end();
+        console.log('PostgreSQL pool closed.');
+      } catch (err) {
+        console.error('Error closing PostgreSQL pool:', err);
+      }
+
+      try {
+        const redisClient = require('./config/redis');
+        if (redisClient.isOpen) {
+          await redisClient.quit();
+          console.log('Redis connection closed.');
+        }
+      } catch (err) {
+        console.error('Error closing Redis connection:', err);
+      }
+
+      console.log('Graceful shutdown complete.');
+      process.exit(0);
+    });
+
+    setTimeout(() => {
+      console.error('Graceful shutdown timed out. Forcing exit.');
+      process.exit(1);
+    }, 8000);
+  }
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+}
