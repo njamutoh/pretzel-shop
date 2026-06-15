@@ -9,7 +9,7 @@
     "migrate": "node scripts/migrate.js",
     "lint": "eslint .",
     "test": "echo \"No backend tests yet\" && exit 0",
-    "test:integration": "node --test test/integration"
+    "test:integration": "node --test test/integration/*.test.js"
   },
   "keywords": [
     "pretzel",
