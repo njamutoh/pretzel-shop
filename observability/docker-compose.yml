@@ -1,0 +1,80 @@
+name: pretzel-observability
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.149.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+      - "13133:13133"
+    networks: [observability]
+
+  prometheus:
+    image: prom/prometheus:v3.10.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks: [observability]
+
+  loki:
+    image: grafana/loki:3.7.1
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/config.yaml:ro
+    ports:
+      - "3100:3100"
+    networks: [observability]
+
+  promtail:
+    image: grafana/promtail:3.6.11
+    volumes:
+      - ./promtail/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yaml
+    networks: [observability]
+
+  tempo:
+    image: grafana/tempo:2.10.3
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3200:3200"
+      - "4319:4317"
+    networks: [observability]
+
+  pyroscope:
+    image: grafana/pyroscope:1.19.1
+    ports:
+      - "4040:4040"
+    networks: [observability]
+
+  grafana:
+    image: grafana/grafana:12.4.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+      - pyroscope
+    networks: [observability]
+
+networks:
+  observability:
+    name: pretzel_observability
+    driver: bridge
