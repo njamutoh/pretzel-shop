@@ -1,4 +1,4 @@
-name: pretzel-app
+name: pretzel_app
 
 services:
   postgres:
