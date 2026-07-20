@@ -279,4 +279,164 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body
-            });
+      });
+
+  deploy:
+    name: Deploy to Production
+
+    needs:
+      - build-scan-sign-backend
+      - build-scan-sign-frontend
+
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          install -m 700 -d "$HOME/.ssh"
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" \
+            > "$HOME/.ssh/pretzel_deploy_key"
+
+          chmod 600 "$HOME/.ssh/pretzel_deploy_key"
+
+          printf '%s\n' "$SSH_KNOWN_HOSTS" \
+            > "$HOME/.ssh/known_hosts"
+
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Test SSH connection
+        shell: bash
+        run: |
+          ssh \
+            -i "$HOME/.ssh/pretzel_deploy_key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            'whoami && docker compose version'
+
+      - name: Copy production Compose file
+        shell: bash
+        run: |
+          scp \
+            -i "$HOME/.ssh/pretzel_deploy_key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            deploy/docker-compose.prod.yml \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/opt/pretzel-shop/docker-compose.prod.yml"
+
+      - name: Authenticate EC2 to GHCR
+        shell: bash
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_PULL_TOKEN" |
+            ssh \
+              -i "$HOME/.ssh/pretzel_deploy_key" \
+              -o BatchMode=yes \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+              'docker login ghcr.io --username njamutoh --password-stdin'
+
+      - name: Pull and deploy application
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${GITHUB_SHA::7}"
+
+          echo "Deploying image tag: $IMAGE_TAG"
+
+          ssh \
+            -i "$HOME/.ssh/pretzel_deploy_key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "IMAGE_TAG='$IMAGE_TAG' bash -s" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          cd /opt/pretzel-shop
+          export IMAGE_TAG
+
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+
+          echo "Pulling backend and frontend images..."
+
+          docker compose \
+            --env-file .env \
+            -f docker-compose.prod.yml \
+            -p pretzel_app \
+            pull backend frontend
+
+          echo "Recreating application containers..."
+
+          docker compose \
+            --env-file .env \
+            -f docker-compose.prod.yml \
+            -p pretzel_app \
+            up -d --no-deps backend frontend
+
+          echo "Container status:"
+
+          docker compose \
+            --env-file .env \
+            -f docker-compose.prod.yml \
+            -p pretzel_app \
+            ps backend frontend
+
+          echo "Waiting for backend health endpoint..."
+
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS http://localhost:3001/health >/dev/null; then
+              echo "Backend health check passed."
+              break
+            fi
+
+            if [ "$attempt" -eq 6 ]; then
+              echo "Backend health check failed."
+
+              docker compose \
+                --env-file .env \
+                -f docker-compose.prod.yml \
+                -p pretzel_app \
+                logs --tail=100 backend
+
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          curl -fsSI http://localhost >/dev/null
+
+          echo "Frontend smoke test passed."
+          echo "Deployment completed successfully."
+          REMOTE_SCRIPT
+
+      - name: Remove temporary SSH files
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.ssh/pretzel_deploy_key"
+          rm -f "$HOME/.ssh/known_hosts"
