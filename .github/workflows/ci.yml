@@ -386,7 +386,7 @@ jobs:
           docker compose \
             --env-file .env \
             -f docker-compose.prod.yml \
-            -p pretzel_app \
+            -p pretzel-shop \
             pull backend frontend
 
           echo "Recreating application containers..."
@@ -394,7 +394,7 @@ jobs:
           docker compose \
             --env-file .env \
             -f docker-compose.prod.yml \
-            -p pretzel_app \
+            -p pretzel-shop \
             up -d --no-deps backend frontend
 
           echo "Container status:"
@@ -402,7 +402,7 @@ jobs:
           docker compose \
             --env-file .env \
             -f docker-compose.prod.yml \
-            -p pretzel_app \
+            -p pretzel-shop \
             ps backend frontend
 
           echo "Waiting for backend health endpoint..."
@@ -419,7 +419,7 @@ jobs:
               docker compose \
                 --env-file .env \
                 -f docker-compose.prod.yml \
-                -p pretzel_app \
+                -p pretzel-shop \
                 logs --tail=100 backend
 
               exit 1
